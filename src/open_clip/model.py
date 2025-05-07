@@ -21,6 +21,8 @@ from .timm_model import TimmModel
 from .transformer import LayerNormFp32, LayerNorm, QuickGELU, Attention, VisionTransformer, TextTransformer,\
     text_global_pool
 from .utils import to_2tuple
+from .pe import PE
+from dataclasses import asdict
 
 
 @dataclass
@@ -31,6 +33,11 @@ class CLIPVisionCfg:
     mlp_ratio: float = 4.0
     patch_size: int = 16
     image_size: Union[Tuple[int, int], int] = 224
+    # PE configs
+    output_dim: int = 1024
+    heads: int = 16
+    use_cls_token: bool = False
+    drop_path: float = 0.0
 
     ls_init_value: Optional[float] = None  # layer scale initial value
     patch_dropout: float = 0.  # what fraction of patches to dropout during training (0 would mean disabled and no patches dropped) - 0.5 to 0.75 recommended in the paper for optimal results
@@ -84,6 +91,7 @@ class CLIPTextCfg:
     hf_pooler_type: str = 'mean_pooler'  # attentional pooling for HF models
 
 
+
 def get_cast_dtype(precision: str):
     cast_dtype = None
     if precision == 'bf16':
@@ -106,7 +114,8 @@ def _build_vision_tower(
         embed_dim: int,
         vision_cfg: CLIPVisionCfg,
         quick_gelu: bool = False,
-        cast_dtype: Optional[torch.dtype] = None
+        cast_dtype: Optional[torch.dtype] = None,
+        is_PE: bool = False,
 ):
     if isinstance(vision_cfg, dict):
         vision_cfg = CLIPVisionCfg(**vision_cfg)
@@ -138,6 +147,23 @@ def _build_vision_tower(
             image_size=vision_cfg.image_size,
             width=vision_cfg.width,
         )
+    elif is_PE:
+        visual = PE(
+            image_size=vision_cfg.image_size,
+            patch_size=vision_cfg.patch_size,
+            width=vision_cfg.width,
+            layers=vision_cfg.layers,
+            heads=vision_cfg.heads,
+            mlp_ratio=vision_cfg.mlp_ratio,
+            output_dim=vision_cfg.output_dim,
+            drop_path=vision_cfg.drop_path,
+            ls_init_value=vision_cfg.ls_init_value,
+            pool_type=vision_cfg.pool_type,
+            use_cls_token=vision_cfg.use_cls_token,
+            use_abs_posemb=True,
+            use_rope2d=True,  # always use 2D RoPE
+        )
+
     else:
         vision_heads = vision_cfg.width // vision_cfg.head_width
         norm_layer = LayerNormFp32 if cast_dtype in (torch.float16, torch.bfloat16) else LayerNorm
@@ -196,7 +222,6 @@ def _build_text_tower(
             norm_layer = partial(norm_layer, **text_cfg.norm_kwargs)
         if text_cfg.act_kwargs is not None:
             act_layer = partial(act_layer, **text_cfg.act_kwargs)
-
         text = TextTransformer(
             context_length=text_cfg.context_length,
             vocab_size=text_cfg.vocab_size,
@@ -233,11 +258,12 @@ class CLIP(nn.Module):
             nonscalar_logit_scale: bool = False,
             cast_dtype: Optional[torch.dtype] = None,
             output_dict: bool = False,
+            is_PE: bool = False,
     ):
         super().__init__()
         self.output_dict = output_dict
 
-        self.visual = _build_vision_tower(embed_dim, vision_cfg, quick_gelu, cast_dtype)
+        self.visual = _build_vision_tower(embed_dim, vision_cfg, quick_gelu, cast_dtype, is_PE=is_PE)
 
         text = _build_text_tower(embed_dim, text_cfg, quick_gelu, cast_dtype)
         self.transformer = text.transformer
@@ -274,6 +300,21 @@ class CLIP(nn.Module):
             for n in self.visual.no_weight_decay():
                 no_wd.add('visual.' + n)
         return no_wd
+
+    @torch.jit.ignore
+    def load_ckpt(self, ckpt_path: str): # for PE only
+        _sd = torch.load(ckpt_path, weights_only=True)
+        if "state_dict" in _sd:
+            _sd = _sd["state_dict"]
+        elif "weights" in _sd:
+            _sd = _sd["weights"]
+
+        _sd = {k.replace("module.", ""): v for k, v in _sd.items()}
+
+        m, u = self.load_state_dict(_sd, strict=False)
+        
+        print(f"Missing keys for loading model: {m}")
+        print(f"Unexpected keys for loading model: {u}")
 
     def encode_image(self, image, normalize: bool = False):
         features = self.visual(image)

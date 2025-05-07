@@ -24,6 +24,8 @@ HF_HUB_PREFIX = 'hf-hub:'
 _MODEL_CONFIG_PATHS = [Path(__file__).parent / f"model_configs/"]
 _MODEL_CONFIGS = {}  # directory (model_name: config) of model architecture configs
 
+from .pe_config import fetch_pe_checkpoint
+
 
 def _natural_key(string_):
     return [int(s) if s.isdigit() else s for s in re.split(r'(\d+)', string_.lower())]
@@ -349,7 +351,7 @@ def create_model(
         else:
             model = CustomTextCLIP(**model_cfg, cast_dtype=cast_dtype)
     else:
-        model = CLIP(**model_cfg, cast_dtype=cast_dtype)
+        model = CLIP(**model_cfg, is_PE=model_name.startswith('PE-Core'), cast_dtype=cast_dtype)
 
     if precision in ("fp16", "bf16"):
         dtype = torch.float16 if 'fp16' in precision else torch.bfloat16
@@ -377,33 +379,38 @@ def create_model(
 
     pretrained_loaded = False
     if pretrained:
-        checkpoint_path = ''
-        pretrained_cfg = get_pretrained_cfg(model_name, pretrained)
-        if pretrained_cfg:
-            checkpoint_path = download_pretrained(pretrained_cfg, cache_dir=cache_dir)
+        if model_name.startswith('PE-Core'):
+            model.load_ckpt(fetch_pe_checkpoint(model_name, checkpoint_path))
+            pretrained_cfg = get_pretrained_cfg(model_name, 'webli')
             preprocess_cfg = merge_preprocess_dict(preprocess_cfg, pretrained_cfg)
-            pretrained_quick_gelu = pretrained_cfg.get('quick_gelu', False)
-            model_quick_gelu = model_cfg.get('quick_gelu', False)
-            if pretrained_quick_gelu and not model_quick_gelu:
-                warnings.warn(
-                    f'These pretrained weights were trained with QuickGELU activation but the model config does '
-                    f'not have that enabled. Consider using a model config with a "-quickgelu" suffix or enable with a flag.')
-            elif not pretrained_quick_gelu and model_quick_gelu:
-                warnings.warn(
-                    f'The pretrained weights were not trained with QuickGELU but this activation is enabled in the '
-                    f'model config, consider using a model config without QuickGELU or disable override flags.')
-        elif os.path.exists(pretrained):
-            checkpoint_path = pretrained
-
-        if checkpoint_path:
-            logging.info(f'Loading pretrained {model_name} weights ({pretrained}).')
-            load_checkpoint(model, checkpoint_path, weights_only=load_weights_only)
         else:
-            error_str = (
-                f'Pretrained weights ({pretrained}) not found for model {model_name}.'
-                f' Available pretrained tags ({list_pretrained_tags_by_model(model_name)}.')
-            logging.warning(error_str)
-            raise RuntimeError(error_str)
+            checkpoint_path = ''
+            pretrained_cfg = get_pretrained_cfg(model_name, pretrained)
+            if pretrained_cfg:
+                checkpoint_path = download_pretrained(pretrained_cfg, cache_dir=cache_dir)
+                preprocess_cfg = merge_preprocess_dict(preprocess_cfg, pretrained_cfg)
+                pretrained_quick_gelu = pretrained_cfg.get('quick_gelu', False)
+                model_quick_gelu = model_cfg.get('quick_gelu', False)
+                if pretrained_quick_gelu and not model_quick_gelu:
+                    warnings.warn(
+                        f'These pretrained weights were trained with QuickGELU activation but the model config does '
+                        f'not have that enabled. Consider using a model config with a "-quickgelu" suffix or enable with a flag.')
+                elif not pretrained_quick_gelu and model_quick_gelu:
+                    warnings.warn(
+                        f'The pretrained weights were not trained with QuickGELU but this activation is enabled in the '
+                        f'model config, consider using a model config without QuickGELU or disable override flags.')
+            elif os.path.exists(pretrained):
+                checkpoint_path = pretrained
+
+            if checkpoint_path:
+                logging.info(f'Loading pretrained {model_name} weights ({pretrained}).')
+                load_checkpoint(model, checkpoint_path, weights_only=load_weights_only)
+            else:
+                error_str = (
+                    f'Pretrained weights ({pretrained}) not found for model {model_name}.'
+                    f' Available pretrained tags ({list_pretrained_tags_by_model(model_name)}.')
+                logging.warning(error_str)
+                raise RuntimeError(error_str)
         pretrained_loaded = True
     elif has_hf_hub_prefix:
         logging.info(f'Loading pretrained {model_name} weights ({checkpoint_path}).')
@@ -498,7 +505,7 @@ def create_model_and_transforms(
         interpolation=image_interpolation,
         resize_mode=image_resize_mode,
     )
-
+    
     model = create_model(
         model_name,
         pretrained,

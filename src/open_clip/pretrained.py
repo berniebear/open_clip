@@ -646,6 +646,15 @@ _PRETRAINED = {
     "ViTamin-XL-384": dict(
         datacomp1b=_pcfg(hf_hub='jienengchen/ViTamin-XL-384px/pytorch_model.bin'),
     ),
+    "PE-Core-B16-224": dict(
+        webli=_slpcfg(hf_hub='hf://facebook/PE-Core-B16-224:PE-Core-B16-224.pt', interpolation='bilinear'),
+    ),
+    "PE-Core-L14-336": dict(
+        webli=_slpcfg(hf_hub='hf://facebook/PE-Core-L14-336:PE-Core-L14-336.pt', interpolation='bilinear'),
+    ),
+    "PE-Core-G14-448": dict(
+        webli=_slpcfg(hf_hub='hf://facebook/PE-Core-G14-448:PE-Core-G14-448.pt', interpolation='bilinear'),
+    ),        
 }
 
 _PRETRAINED_quickgelu = {}
