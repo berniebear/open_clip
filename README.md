@@ -57,7 +57,7 @@ import open_clip
 
 model, _, preprocess = open_clip.create_model_and_transforms('PE-Core-L14-336', pretrained=True)
 tokenizer = open_clip.get_tokenizer('PE-Core-L14-336')
-image = preprocess(Image.open("/home/berniehuang/git/temp_0501/perception_models/apps/pe/docs/assets/cat.png")).unsqueeze(0)
+image = preprocess(Image.open("docs/cat.png")).unsqueeze(0)
 text = tokenizer(["a diagram", "a dog", "a cat"])
 with torch.no_grad(), torch.autocast("cuda"):
     image_features = model.encode_image(image)
