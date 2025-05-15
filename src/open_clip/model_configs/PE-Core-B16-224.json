@@ -1,5 +1,5 @@
 {
-    "embed_dim": 768,
+    "embed_dim": 1024,
     "quick_gelu": false,
     "vision_cfg": {
         "image_size": 224,
