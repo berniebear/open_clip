@@ -53,6 +53,7 @@ training = [
     'transformers[sentencepiece]',
     'timm>=1.0.10',
     'fsspec',
+    'einops'
 ]
 test = [
     'pytest-split',
